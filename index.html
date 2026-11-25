@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="pt-PT">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Livros de Colorir · Aventuras</title>
+<style>
+:root{--bg:#f4f8ec;--card:#fff;--ink:#23301f;--mut:#667262;--line:#dbe5cc;--acc:#2f7d3b}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif}
+main{max-width:720px;margin:0 auto;padding:20px 14px 130px}
+h1{font:800 1.7rem/1.15 Georgia,serif;margin:6px 0 4px;color:#2a5d2f}
+.sub{color:var(--mut);margin:0 0 12px}
+.promo{background:#fff3d6;border:1px solid #f0d28a;border-radius:12px;padding:10px 12px;margin:0 0 16px;font-size:.95rem}
+.grid{display:grid;grid-template-columns:repeat(2,1fr);gap:12px}
+@media(min-width:560px){.grid{grid-template-columns:repeat(3,1fr)}}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;overflow:hidden;display:flex;flex-direction:column}
+.card img{width:100%;display:block;aspect-ratio:340/473;object-fit:cover;background:#e8efdc}
+.card .b{padding:10px 10px 12px;display:flex;flex-direction:column;gap:8px;flex:1}
+.card h3{margin:0;font-size:1rem}
+.card .p{color:var(--mut);font-size:.9rem}
+.qty{display:flex;align-items:center;justify-content:space-between;margin-top:auto}
+.qty button{width:40px;height:40px;border-radius:10px;border:1px solid var(--line);background:#f0f5e6;font-size:1.3rem;font-weight:700;color:var(--ink);cursor:pointer}
+.qty span{font-size:1.15rem;font-weight:700;min-width:2ch;text-align:center}
+.card.on{border-color:var(--acc);box-shadow:0 0 0 2px var(--acc) inset}
+h2{font-size:1.1rem;margin:26px 0 10px}
+.form{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px}
+label{display:block;font-size:.85rem;color:var(--mut);margin:12px 0 4px}
+label:first-child{margin-top:0}
+input,textarea{width:100%;padding:12px;border:1px solid var(--line);border-radius:10px;font:inherit;color:var(--ink);background:#fbfdf7}
+textarea{min-height:70px;resize:vertical}
+.row{display:grid;grid-template-columns:1fr 1.4fr;gap:10px}
+.bar{position:fixed;left:0;right:0;bottom:0;background:#fff;border-top:1px solid var(--line);padding:10px 14px calc(10px + env(safe-area-inset-bottom,0px))}
+.bar>div{max-width:720px;margin:0 auto;display:flex;align-items:center;gap:12px}
+.tot{flex:1;font-size:.85rem;color:var(--mut)}.tot b{display:block;color:var(--ink);font-size:1.15rem}
+#send{padding:14px 18px;border:0;border-radius:12px;background:#25a244;color:#fff;font:700 1rem system-ui;cursor:pointer}
+#send:disabled{opacity:.45}
+#msg{color:#c0392b;font-size:.9rem;margin-top:10px;min-height:1.2em}
+.note{font-size:.85rem;color:var(--mut);margin-top:10px}
+</style>
+</head>
+<body>
+<main>
+<h1>Livros de Colorir 🎨</h1>
+<p class="sub">Formato A6 · desenhos grandes, um por página. Escolhe os livros e a quantidade, preenche os dados e envia o pedido por WhatsApp.</p>
+<div class="promo" id="promo"></div>
+<div class="grid" id="grid"></div>
+
+<h2>Os teus dados</h2>
+<div class="form">
+<label for="nome">Nome</label><input id="nome" autocomplete="name">
+<label for="tel">Telemóvel / contacto</label><input id="tel" type="tel" autocomplete="tel" inputmode="tel">
+<label for="rua">Morada (rua, número, andar)</label><input id="rua" autocomplete="street-address">
+<div class="row">
+<div><label for="cp">Código postal</label><input id="cp" autocomplete="postal-code" placeholder="0000-000" inputmode="numeric"></div>
+<div><label for="loc">Localidade</label><input id="loc" autocomplete="address-level2"></div>
+</div>
+<label for="obs">Observações (opcional)</label><textarea id="obs"></textarea>
+<div id="msg"></div>
+<p class="note" id="entrega"></p>
+</div>
+</main>
+
+<div class="bar"><div>
+<div class="tot"><span id="cnt">0 livros</span><b id="tot">0,00 €</b></div>
+<button id="send" disabled>Enviar pedido por WhatsApp</button>
+</div></div>
+
+<script>
+/* =====================================================
+   CONFIGURAÇÃO — é aqui que mudas tudo
+   ===================================================== */
+const WHATSAPP = "351915099341";   // número com indicativo, sem + nem espaços
+
+const PRECO = 1.50;                // preço normal por livro (€)
+const PRECO_LOTE = 1.00;           // preço por livro a partir da quantidade abaixo
+const LOTE_A_PARTIR_DE = 10;       // nº total de livros (10 = "10 ou mais"; mete 11 para "mais de 10")
+
+const NOTA_ENTREGA = "Entrega por CTT ou em mão, combinamos pelo WhatsApp.";
+
+/* LIVROS: para adicionar um livro novo, copia uma linha e muda-a.
+   - id:   nome curto, sem espaços nem acentos (único)
+   - nome: o que aparece no site
+   - img:  caminho da capa (põe o ficheiro .jpg na pasta "capas")
+   - preco / precoLote: OPCIONAIS, só se esse livro tiver preço diferente
+   Para esconder um livro, apaga a linha ou põe // no início. */
+const LIVROS = [
+  {id:"cachorrinho", nome:"Aventuras do Cachorrinho", img:"capas/cachorrinho.jpg"},
+  {id:"coelhinho",   nome:"Aventuras do Coelhinho",   img:"capas/coelhinho.jpg"},
+  {id:"gatinho",     nome:"Aventuras do Gatinho",     img:"capas/gatinho.jpg"},
+  {id:"leaozinho",   nome:"Aventuras do Leãozinho",   img:"capas/leaozinho.jpg"},
+  {id:"mostrinho",   nome:"Aventuras do Mostrinho",   img:"capas/mostrinho.jpg"},
+  {id:"papainoel",   nome:"Aventuras do Papai Noel",  img:"capas/papainoel.jpg"},
+];
+/* ===================================================== */
+
+const $=id=>document.getElementById(id);
+const eur=v=>v.toFixed(2).replace('.',',')+' €';
+const qty={};
+const total=()=>LIVROS.reduce((a,b)=>a+qty[b.id],0);
+const unit=b=>total()>=LOTE_A_PARTIR_DE?(b.precoLote??PRECO_LOTE):(b.preco??PRECO);
+
+$('entrega').textContent=NOTA_ENTREGA;
+$('promo').innerHTML='<b>'+eur(PRECO)+'</b> por livro · a partir de <b>'+LOTE_A_PARTIR_DE+'</b> livros (podes misturar títulos) fica <b>'+eur(PRECO_LOTE)+'</b> cada.';
+
+const grid=$('grid');
+LIVROS.forEach(b=>{
+  qty[b.id]=0;
+  const c=document.createElement('div');c.className='card';
+  const img=document.createElement('img');img.alt='Capa: '+b.nome;img.src=b.img;img.loading='lazy';
+  const body=document.createElement('div');body.className='b';
+  body.innerHTML='<h3></h3><div class="p"></div><div class="qty"><button type="button" aria-label="Menos">−</button><span>0</span><button type="button" aria-label="Mais">+</button></div>';
+  body.querySelector('h3').textContent=b.nome;
+  c.append(img,body);
+  const [m,p]=body.querySelectorAll('button'),s=body.querySelector('span');
+  b._el=c;b._p=body.querySelector('.p');b._s=s;
+  const set=d=>{qty[b.id]=Math.max(0,Math.min(99,qty[b.id]+d));upd();};
+  m.onclick=()=>set(-1);p.onclick=()=>set(1);
+  grid.appendChild(c);
+});
+
+function upd(){
+  const n=total();let t=0;
+  LIVROS.forEach(b=>{b._s.textContent=qty[b.id];b._el.classList.toggle('on',qty[b.id]>0);b._p.textContent=eur(unit(b))+' / livro';t+=qty[b.id]*unit(b);});
+  $('cnt').textContent=n+(n===1?' livro':' livros')+(n>0&&n<LOTE_A_PARTIR_DE?' · faltam '+(LOTE_A_PARTIR_DE-n)+' p/ '+eur(PRECO_LOTE):(n>=LOTE_A_PARTIR_DE?' · preço especial ✔':''));
+  $('tot').textContent=eur(t);$('send').disabled=n===0;
+}
+upd();
+
+$('send').onclick=()=>{
+  const v=id=>$(id).value.trim(),msg=$('msg');
+  const miss=[['nome','nome'],['tel','contacto'],['rua','morada'],['cp','código postal'],['loc','localidade']].filter(([i])=>!v(i)).map(x=>x[1]);
+  if(miss.length){msg.textContent='Falta preencher: '+miss.join(', ')+'.';return;}
+  msg.textContent='';
+  let t=0;
+  const linhas=LIVROS.filter(b=>qty[b.id]>0).map(b=>{const s=qty[b.id]*unit(b);t+=s;return '• '+qty[b.id]+'x '+b.nome+' ('+eur(s)+')';});
+  const txt=['*Novo pedido – Livros de Colorir*','',...linhas,'','*Total ('+total()+' livros):* '+eur(t),'',
+    '*Nome:* '+v('nome'),'*Contacto:* '+v('tel'),'*Morada:* '+v('rua'),'*Código postal:* '+v('cp')+' '+v('loc')];
+  if(v('obs'))txt.push('*Obs.:* '+v('obs'));
+  window.location.href='https://wa.me/'+WHATSAPP+'?text='+encodeURIComponent(txt.join('\n'));
+};
+</script>
+</body>
+</html>
