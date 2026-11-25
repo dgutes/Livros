@@ -98,6 +98,7 @@ const $=id=>document.getElementById(id);
 const eur=v=>v.toFixed(2).replace('.',',')+' €';
 const qty={};
 const total=()=>LIVROS.reduce((a,b)=>a+qty[b.id],0);
+const orig=b=>b.preco??PRECO;
 const unit=b=>total()>=LOTE_A_PARTIR_DE?(b.precoLote??PRECO_LOTE):(b.preco??PRECO);
 
 $('entrega').textContent=NOTA_ENTREGA;
@@ -123,7 +124,8 @@ function upd(){
   const n=total();let t=0;
   LIVROS.forEach(b=>{b._s.textContent=qty[b.id];b._el.classList.toggle('on',qty[b.id]>0);b._p.textContent=eur(unit(b))+' / livro';t+=qty[b.id]*unit(b);});
   $('cnt').textContent=n+(n===1?' livro':' livros')+(n>0&&n<LOTE_A_PARTIR_DE?' · faltam '+(LOTE_A_PARTIR_DE-n)+' p/ '+eur(PRECO_LOTE):(n>=LOTE_A_PARTIR_DE?' · preço especial ✔':''));
-  $('tot').textContent=eur(t);$('send').disabled=n===0;
+  const so=LIVROS.reduce((a,b)=>a+qty[b.id]*orig(b),0);
+  $('tot').innerHTML=(so-t>0.004?'<s style="font-weight:400;color:var(--mut);font-size:.9rem">'+eur(so)+'</s> ':'')+eur(t);$('send').disabled=n===0;
 }
 upd();
 
@@ -132,9 +134,13 @@ $('send').onclick=()=>{
   const miss=[['nome','nome'],['tel','contacto'],['rua','morada'],['cp','código postal'],['loc','localidade']].filter(([i])=>!v(i)).map(x=>x[1]);
   if(miss.length){msg.textContent='Falta preencher: '+miss.join(', ')+'.';return;}
   msg.textContent='';
-  let t=0;
-  const linhas=LIVROS.filter(b=>qty[b.id]>0).map(b=>{const s=qty[b.id]*unit(b);t+=s;return '• '+qty[b.id]+'x '+b.nome+' ('+eur(s)+')';});
-  const txt=['*Novo pedido – Livros de Colorir*','',...linhas,'','*Total ('+total()+' livros):* '+eur(t),'',
+  let sub=0,t=0;
+  const linhas=LIVROS.filter(b=>qty[b.id]>0).map(b=>{const o=qty[b.id]*orig(b);sub+=o;t+=qty[b.id]*unit(b);return '• '+qty[b.id]+'x '+b.nome+' ('+eur(o)+')';});
+  const desc=sub-t;
+  const fin=['*Subtotal:* '+eur(sub)];
+  if(desc>0.004)fin.push('*Desconto (preço especial, '+total()+' livros):* -'+eur(desc));
+  fin.push('*TOTAL A PAGAR:* '+eur(t));
+  const txt=['*Novo pedido – Livros de Colorir*','',...linhas,'',...fin,'',
     '*Nome:* '+v('nome'),'*Contacto:* '+v('tel'),'*Morada:* '+v('rua'),'*Código postal:* '+v('cp')+' '+v('loc')];
   if(v('obs'))txt.push('*Obs.:* '+v('obs'));
   window.location.href='https://wa.me/'+WHATSAPP+'?text='+encodeURIComponent(txt.join('\n'));
