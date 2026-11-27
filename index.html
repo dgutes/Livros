@@ -37,12 +37,17 @@ textarea{min-height:70px;resize:vertical}
 #send:disabled{opacity:.45}
 #msg{color:#c0392b;font-size:.9rem;margin-top:10px;min-height:1.2em}
 .note{font-size:.85rem;color:var(--mut);margin-top:10px}
+.opt{display:flex;gap:10px;align-items:flex-start;border:1px solid var(--line);border-radius:12px;padding:10px 12px;margin:8px 0 0;cursor:pointer;background:#fbfdf7;font-size:1rem;color:var(--ink)}
+.opt input{width:auto;padding:0;margin-top:5px}
+.opt.on{border-color:var(--acc);background:#eef7e8}
+.opt b{display:block}.opt small{color:var(--mut);font-size:.85rem}
+#fi{font-size:.92rem;margin:10px 0 0;min-height:1.3em}
 </style>
 </head>
 <body>
 <main>
 <h1>Livros de Colorir 🎨</h1>
-<p class="sub">Formato A6 · desenhos grandes, um por página. Escolhe os livros e a quantidade, preenche os dados e envia o pedido por WhatsApp.</p>
+<p class="sub">Formato A6 · 24 desenhos grandes para colorir, um por página, com o verso em branco. Escolhe os livros e a quantidade, preenche os dados e envia o pedido por WhatsApp.</p>
 <div class="promo" id="promo"></div>
 <div class="grid" id="grid"></div>
 
@@ -50,11 +55,14 @@ textarea{min-height:70px;resize:vertical}
 <div class="form">
 <label for="nome">Nome</label><input id="nome" autocomplete="name">
 <label for="tel">Telemóvel / contacto</label><input id="tel" type="tel" autocomplete="tel" inputmode="tel">
-<label for="rua">Morada (rua, número, andar)</label><input id="rua" autocomplete="street-address">
+<label for="rua">Morada (rua, número, andar) <span id="reqm"></span></label><input id="rua" autocomplete="street-address">
 <div class="row">
 <div><label for="cp">Código postal</label><input id="cp" autocomplete="postal-code" placeholder="0000-000" inputmode="numeric"></div>
 <div><label for="loc">Localidade</label><input id="loc" autocomplete="address-level2"></div>
 </div>
+<label style="margin-top:18px">Como queres receber?</label>
+<div id="envio"></div>
+<div id="fi"></div>
 <label for="obs">Observações (opcional)</label><textarea id="obs"></textarea>
 <div id="msg"></div>
 <p class="note" id="entrega"></p>
@@ -76,7 +84,32 @@ const PRECO = 1.50;                // preço normal por livro (€)
 const PRECO_LOTE = 1.00;           // preço por livro a partir da quantidade abaixo
 const LOTE_A_PARTIR_DE = 10;       // nº total de livros (10 = "10 ou mais"; mete 11 para "mais de 10")
 
-const NOTA_ENTREGA = "Entrega por CTT ou em mão, combinamos pelo WhatsApp.";
+const NOTA_ENTREGA = "Depois de enviares o pedido, confirmamos tudo contigo pelo WhatsApp.";
+
+/* ---------- ENTREGA / FRETE ----------
+   Cada opção pode ser desligada com ativo:false. */
+const ENTREGA = {
+  palacio: { ativo:true, nome:"Entrega no Palácio do Gelo", desc:"Grátis. Combinamos dia e hora pelo WhatsApp." },
+  ctt:     { ativo:true, nome:"Envio por CTT", desc:"Correio Registado com rastreio. O valor depende do peso (quantidade de livros).",
+             pesoLivroG:40,         // PESA 1 LIVRO e põe aqui o peso em gramas (24 folhas A6 + capa ≈ 35-45 g)
+             pesoEmbalagemG:30,     // peso do envelope/proteção que usas
+             espessuraLivroMm:3,    // espessura de 1 livro (mm) — só conta para o Registado Simples
+             espessuraEmbalagemMm:4,
+             maxSimplesMm:35,       // limite de espessura do Registado Simples (3,5 cm)
+             extra:0,               // custo extra por envio (€), ex: envelope. 0 = nenhum
+             gratisAPartirDe:null,  // ex: 30 = envio grátis em pedidos de livros a partir de 30 €. null = nunca
+             // Preços CTT (Correio Registado, pacote postal, Portugal) — confirma em ctt.pt/particulares quando mudarem
+             // "simples" = Correio Registado Simples (só até 100 g)
+             escaloes:[ {ate:100, preco:4.60, simples:4.05}, {ate:500, preco:5.40}, {ate:2000, preco:8.93} ] },
+  casa:    { ativo:true, nome:"Entrega em casa", desc:"Vamos de carro até à tua morada. O valor depende da distância.",
+             origem:"3510-418, Portugal", // MORADA DE ONDE SAIS, ex: "Rua X, 3500-000 Viseu, Portugal" (ou {lat:40.66,lon:-7.91})
+             kmBase:10,             // até estes km (só ida) paga a taxa base
+             precoBase:5.00,        // taxa base (€) até kmBase
+             litro:2.00,            // preço do combustível (€/litro)
+             kmPorLitro:16,         // consumo do carro
+             idaVolta:true,         // conta a viagem de ida e volta nos km extra
+             arredondar:0.50 }      // arredonda o valor para cima a múltiplos de (€)
+};
 
 /* LIVROS: para adicionar um livro novo, copia uma linha e muda-a.
    - id:   nome curto, sem espaços nem acentos (único)
@@ -132,18 +165,113 @@ LIVROS.forEach(b=>{
   grid.appendChild(c);
 });
 
+const frete={tipo:null,valor:null,estado:'',info:''};   // estado: ''|'calc'|'ok'|'erro'
+let livrosTot=0;
+
+const cttCalc=n=>{
+  const C=ENTREGA.ctt,cap=Math.max(1,Math.floor((2000-C.pesoEmbalagemG)/C.pesoLivroG));
+  let resto=n,val=0,pacotes=0,peso=0;
+  while(resto>0){
+    const q=Math.min(cap,resto);resto-=q;pacotes++;
+    const p=q*C.pesoLivroG+C.pesoEmbalagemG;peso+=p;
+    const e=C.escaloes.find(x=>p<=x.ate)||C.escaloes[C.escaloes.length-1];
+    const esp=q*C.espessuraLivroMm+C.espessuraEmbalagemMm;
+    val+=((e.simples!=null&&esp<=C.maxSimplesMm)?e.simples:e.preco)+(C.extra||0);
+  }
+  if(C.gratisAPartirDe!=null&&livrosTot>=C.gratisAPartirDe)val=0;
+  return {valor:val,pacotes,peso};
+};
+function applyCtt(){
+  const n=total();
+  if(!n){frete.valor=null;frete.estado='';frete.info='📦 Escolhe os livros para veres o valor do envio por CTT.';return;}
+  const r=cttCalc(n),ilhas=/^9/.test($('cp').value.trim());
+  frete.valor=r.valor;frete.estado='ok';frete.peso=r.peso;frete.pacotes=r.pacotes;
+  frete.info='📦 Envio por CTT (Correio Registado, com rastreio): <b>'+(r.valor===0?'grátis':eur(r.valor))+'</b><br><small>Peso estimado: ~'+r.peso+' g'+(r.pacotes>1?', em '+r.pacotes+' envios':'')+(ilhas?'. Açores/Madeira: o prazo de entrega pode ser mais longo.':'.')+'</small>';
+}
+
 function upd(){
   const n=total();let t=0;
   LIVROS.forEach(b=>{b._s.textContent=qty[b.id];b._el.classList.toggle('on',qty[b.id]>0);b._p.textContent=eur(unit(b))+' / livro';t+=qty[b.id]*unit(b);});
+  livrosTot=t;
+  if(frete.tipo==='ctt'){applyCtt();$('fi').innerHTML=frete.info;}
   $('cnt').textContent=n+(n===1?' livro':' livros')+(n>0&&n<LOTE_A_PARTIR_DE?' · faltam '+(LOTE_A_PARTIR_DE-n)+' p/ '+eur(PRECO_LOTE):(n>=LOTE_A_PARTIR_DE?' · preço especial ✔':''));
   const so=LIVROS.reduce((a,b)=>a+qty[b.id]*orig(b),0);
-  $('tot').innerHTML=(so-t>0.004?'<s style="font-weight:400;color:var(--mut);font-size:.9rem">'+eur(so)+'</s> ':'')+eur(t);$('send').disabled=n===0;
+  const fr=(frete.valor!=null)?frete.valor:0, pend=(frete.tipo&&frete.valor==null);
+  $('tot').innerHTML=(so-t>0.004?'<s style="font-weight:400;color:var(--mut);font-size:.9rem">'+eur(so)+'</s> ':'')+eur(t+fr)+(pend?' <small style="font-weight:400;font-size:.8rem">+ entrega a confirmar</small>':'');
+  $('send').disabled=n===0;
 }
+
+/* ---------- cálculo da entrega ---------- */
+const custoCasa=km=>{                       // km = distância só de ida, por estrada
+  const C=ENTREGA.casa;let v=C.precoBase;
+  if(km>C.kmBase){v+=(km-C.kmBase)*(C.idaVolta?2:1)/C.kmPorLitro*C.litro;}
+  const r=C.arredondar||0.01;return Math.ceil(v/r-1e-9)*r;
+};
+const geo=async q=>{
+  const r=await fetch('https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&countrycodes=pt&q='+encodeURIComponent(q));
+  const j=await r.json();return j[0]?{lat:+j[0].lat,lon:+j[0].lon}:null;
+};
+const rota=async(a,b)=>{
+  const r=await fetch('https://router.project-osrm.org/route/v1/driving/'+a.lon+','+a.lat+';'+b.lon+','+b.lat+'?overview=false');
+  const j=await r.json();if(!j.routes||!j.routes[0])throw new Error('sem rota');return j.routes[0].distance/1000;
+};
+let origemP=null;
+const origem=()=>origemP||(origemP=(async()=>{const o=ENTREGA.casa.origem;if(o&&typeof o==='object')return o;if(!o)return null;return await geo(o);})());
+let tok=0,tim=null;
+
+function setFrete(tipo,valor,estado,info){frete.tipo=tipo;frete.valor=valor;frete.estado=estado;frete.info=info;$('fi').innerHTML=info||'';upd();}
+
+async function calcCasa(){
+  const my=++tok,v=id=>$(id).value.trim();
+  const cp=v('cp'),loc=v('loc'),rua=v('rua');
+  if(!/^\d{4}-?\d{3}$/.test(cp)||!loc){setFrete('casa',null,'',' Preenche o código postal e a localidade para calcularmos a entrega.');return;}
+  setFrete('casa',null,'calc','⏳ A calcular a distância…');
+  try{
+    const o=await origem();if(my!==tok)return;
+    if(!o){setFrete('casa',null,'erro','Entrega em casa: valor a confirmar pelo WhatsApp.');return;}
+    let d=null;
+    for(const q of [rua+', '+cp+' '+loc+', Portugal',cp+' '+loc+', Portugal',loc+', Portugal']){
+      d=await geo(q);if(my!==tok)return;if(d)break;
+      await new Promise(r=>setTimeout(r,1100));if(my!==tok)return;
+    }
+    if(!d){setFrete('casa',null,'erro','Não consegui localizar a morada. Envia o pedido e confirmamos o valor da entrega pelo WhatsApp.');return;}
+    const km=await rota(o,d);if(my!==tok)return;
+    const val=custoCasa(km);
+    frete.km=km;
+    setFrete('casa',val,'ok','🚗 Distância aproximada: <b>'+km.toFixed(1).replace('.',',')+' km</b> → entrega em casa: <b>'+eur(val)+'</b>');
+  }catch(e){if(my===tok)setFrete('casa',null,'erro','Não foi possível calcular agora. Envia o pedido e confirmamos o valor da entrega pelo WhatsApp.');}
+}
+const agendaCalc=()=>{if(frete.tipo!=='casa')return;clearTimeout(tim);tok++;setFrete('casa',null,'calc','⏳ A calcular a distância…');tim=setTimeout(calcCasa,900);};
+['rua','cp','loc'].forEach(i=>$(i).addEventListener('input',agendaCalc));
+$('cp').addEventListener('input',()=>{if(frete.tipo==='ctt')upd();});
+
+function escolheEnvio(id){
+  tok++;clearTimeout(tim);
+  document.querySelectorAll('.opt').forEach(o=>o.classList.toggle('on',o.dataset.id===id));
+  $('reqm').textContent=(id==='palacio')?'(não é preciso)':'';
+  if(id==='palacio')setFrete('palacio',0,'ok','✅ Entrega grátis no Palácio do Gelo. Combinamos dia e hora pelo WhatsApp.');
+  else if(id==='ctt'){frete.tipo='ctt';frete.km=null;upd();}
+  else if(id==='casa')calcCasa();
+}
+(function(){
+  const box=$('envio');
+  Object.entries(ENTREGA).filter(([k,o])=>o.ativo).forEach(([k,o])=>{
+    const l=document.createElement('label');l.className='opt';l.dataset.id=k;
+    l.innerHTML='<input type="radio" name="envio"><span><b></b><small></small></span>';
+    l.querySelector('b').textContent=o.nome;l.querySelector('small').textContent=o.desc;
+    l.querySelector('input').onchange=()=>escolheEnvio(k);
+    box.appendChild(l);
+  });
+})();
 upd();
 
 $('send').onclick=()=>{
   const v=id=>$(id).value.trim(),msg=$('msg');
-  const miss=[['nome','nome'],['tel','contacto'],['rua','morada'],['cp','código postal'],['loc','localidade']].filter(([i])=>!v(i)).map(x=>x[1]);
+  if(!frete.tipo){msg.textContent='Escolhe como queres receber os livros.';return;}
+  if(frete.estado==='calc'){msg.textContent='Aguarda um segundo, estamos a calcular a entrega…';return;}
+  const campos=[['nome','nome'],['tel','contacto']];
+  if(frete.tipo!=='palacio')campos.push(['rua','morada'],['cp','código postal'],['loc','localidade']);
+  const miss=campos.filter(([i])=>!v(i)).map(x=>x[1]);
   if(miss.length){msg.textContent='Falta preencher: '+miss.join(', ')+'.';return;}
   msg.textContent='';
   let sub=0,t=0;
@@ -151,9 +279,11 @@ $('send').onclick=()=>{
   const desc=sub-t;
   const fin=['*Subtotal:* '+eur(sub)];
   if(desc>0.004)fin.push('*Desconto (preço especial, '+total()+' livros):* -'+eur(desc));
-  fin.push('*TOTAL A PAGAR:* '+eur(t));
-  const txt=['*Novo pedido – Livros de Colorir*','',...linhas,'',...fin,'',
-    '*Nome:* '+v('nome'),'*Contacto:* '+v('tel'),'*Morada:* '+v('rua'),'*Código postal:* '+v('cp')+' '+v('loc')];
+  const nomeEnv={palacio:'Entrega no Palácio do Gelo (grátis)',ctt:'Envio por CTT (Correio Registado, ~'+frete.peso+' g)',casa:'Entrega em casa'+(frete.km?' (~'+frete.km.toFixed(1).replace('.',',')+' km)':'')}[frete.tipo];
+  fin.push('*Entrega:* '+nomeEnv+(frete.valor!=null&&frete.tipo!=='palacio'?' – '+eur(frete.valor):(frete.valor==null?' – valor a confirmar':'')));
+  fin.push('*TOTAL A PAGAR:* '+eur(t+(frete.valor||0))+(frete.valor==null?' + entrega a confirmar':''));
+  const txt=['*Novo pedido – Livros de Colorir*','',...linhas,'',...fin,'','*Nome:* '+v('nome'),'*Contacto:* '+v('tel')];
+  if(frete.tipo!=='palacio')txt.push('*Morada:* '+v('rua'),'*Código postal:* '+v('cp')+' '+v('loc'));
   if(v('obs'))txt.push('*Obs.:* '+v('obs'));
   window.location.href='https://wa.me/'+WHATSAPP+'?text='+encodeURIComponent(txt.join('\n'));
 };
